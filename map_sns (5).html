@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>みんなのマップ</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#212529">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="みんマップ">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; font-family: 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', sans-serif; }
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── Header ── */
+#header {
+  flex-shrink: 0; height: 54px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 16px;
+  background: #fff;
+  border-bottom: 1px solid #e9ecef;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  z-index: 1000;
+}
+.hd-l { display: flex; flex-direction: column; gap: 1px; }
+.hd-t { font-size: 16px; font-weight: 600; color: #212529; display: flex; align-items: center; gap: 7px; }
+.hd-t i { color: #4dabf7; }
+.hd-s { font-size: 11px; color: #868e96; }
+
+#post-btn {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1.5px solid #dee2e6;
+  background: #fff; color: #495057;
+  cursor: pointer; transition: all 0.15s;
+}
+#post-btn:hover { background: #f1f3f5; }
+#post-btn.cancel { background: #fff5f5; color: #e03131; border-color: #ffa8a8; }
+
+/* ── Map ── */
+#map { flex: 1; min-height: 0; }
+#map.pm .leaflet-container { cursor: crosshair !important; }
+
+/* ── Mode Banner ── */
+#banner {
+  position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+  display: none; align-items: center; gap: 8px;
+  background: #fff5f5; color: #e03131; border: 1.5px solid #ffa8a8;
+  padding: 9px 18px; border-radius: 24px;
+  font-size: 13px; font-weight: 600; z-index: 2000;
+  white-space: nowrap; cursor: pointer;
+  box-shadow: 0 2px 12px rgba(224,49,49,0.15);
+  animation: bnc .2s ease;
+}
+@keyframes bnc {
+  from { transform: translateX(-50%) translateY(-6px); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0);  opacity: 1; }
+}
+
+/* ── Modal ── */
+#overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.42);
+  z-index: 3000;
+  display: none; align-items: flex-end; justify-content: center;
+  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+}
+#overlay.show { display: flex; }
+
+#modal {
+  width: 100%; max-width: 560px;
+  background: #fff;
+  border-radius: 20px 20px 0 0;
+  border-top: 1px solid #e9ecef;
+  padding: 0 20px 28px;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.12);
+  animation: sup .28s cubic-bezier(.4,0,.2,1);
+  max-height: 92vh; overflow-y: auto;
+}
+@keyframes sup {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+.hdl { width: 40px; height: 4px; background: #dee2e6; border-radius: 2px; margin: 14px auto 16px; }
+.mtitle { font-size: 16px; font-weight: 600; color: #212529; margin-bottom: 3px; }
+.mloc {
+  font-size: 11px; color: #868e96;
+  display: flex; align-items: center; gap: 4px;
+  margin-bottom: 16px;
+}
+.sl { font-size: 11px; font-weight: 600; color: #868e96; text-transform: uppercase; letter-spacing: .6px; margin: 14px 0 8px; }
+.cr { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 2px; }
+.cb {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 500;
+  padding: 5px 12px 5px 5px; border-radius: 20px;
+  border: 1.5px solid #dee2e6;
+  background: #fff; color: #495057;
+  cursor: pointer; transition: all .12s;
+}
+.cb-badge {
+  width: 24px; height: 24px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 14px; transition: all .12s;
+}
+textarea {
+  width: 100%; height: 88px;
+  padding: 12px; font-size: 14px; font-family: inherit;
+  border: 1.5px solid #dee2e6; border-radius: 12px;
+  background: #fff; color: #212529;
+  resize: none; outline: none; line-height: 1.6;
+  transition: border-color .15s;
+}
+textarea:focus { border-color: #74c0fc; }
+.cc { text-align: right; font-size: 11px; color: #adb5bd; margin: 4px 0 14px; }
+.er { display: flex; gap: 7px; margin-bottom: 18px; }
+.eb {
+  flex: 1; padding: 7px; font-size: 12px;
+  border: 1.5px solid #dee2e6; border-radius: 10px;
+  background: #fff; color: #495057;
+  cursor: pointer; text-align: center; transition: all .12s;
+}
+.eb.sel { border-color: #4dabf7; background: #e7f5ff; color: #1c7ed6; font-weight: 600; }
+.acts { display: flex; gap: 10px; }
+.bcanc {
+  padding: 12px 20px; font-size: 14px;
+  border: 1.5px solid #dee2e6; border-radius: 12px;
+  background: #fff; color: #868e96; cursor: pointer;
+}
+.bsubm {
+  flex: 1; padding: 12px; font-size: 14px; font-weight: 600;
+  border: none; border-radius: 12px;
+  background: #212529; color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  transition: opacity .15s;
+}
+.bsubm:hover { opacity: .84; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed; bottom: 24px; left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: #212529; color: #fff;
+  padding: 12px 20px; border-radius: 24px;
+  font-size: 13px; font-weight: 500; z-index: 4000;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,.22);
+  transition: transform .3s cubic-bezier(.4,0,.2,1), opacity .3s;
+  opacity: 0; pointer-events: none;
+}
+#toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+/* ── Popup overrides ── */
+.leaflet-popup-content-wrapper {
+  border-radius: 14px !important;
+  border: 1px solid #e9ecef !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,.14) !important;
+  padding: 0 !important; overflow: hidden;
+}
+.leaflet-popup-content { margin: 14px 16px !important; font-family: inherit !important; }
+.leaflet-popup-tip-container { display: none; }
+.pp-cat {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600;
+  padding: 3px 9px; border-radius: 12px; margin-bottom: 7px;
+}
+.pp-txt { font-size: 14px; line-height: 1.6; color: #212529; margin-bottom: 9px; max-width: 220px; word-break: break-all; }
+.pp-meta {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: #adb5bd;
+  border-top: 1px solid #f1f3f5; padding-top: 7px;
+}
+.pp-urg { color: #e03131; font-weight: 600; }
+/* ── PWA Install Banner ── */
+#install-banner {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: #212529; color: #fff;
+  padding: 14px 16px; z-index: 5000;
+  display: none; align-items: center; gap: 12px;
+  box-shadow: 0 -2px 12px rgba(0,0,0,.25);
+  animation: slideup-banner .3s ease;
+}
+@keyframes slideup-banner {
+  from { transform: translateY(100%); } to { transform: translateY(0); }
+}
+#install-banner.show { display: flex; }
+.ib-icon { font-size: 26px; flex-shrink: 0; }
+.ib-text { flex: 1; min-width: 0; }
+.ib-title { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.ib-sub { font-size: 11px; color: #adb5bd; }
+.ib-install {
+  padding: 8px 16px; border-radius: 20px; border: none;
+  background: #4dabf7; color: #fff;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.ib-close {
+  background: none; border: none; color: #868e96;
+  font-size: 18px; cursor: pointer; padding: 4px 2px; flex-shrink: 0;
+  line-height: 1;
+}
+@keyframes mkpulse {
+  0%   { transform: scale(1); opacity: .55; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+.mk-pulse {
+  position: absolute; inset: 0; border-radius: 50%;
+  animation: mkpulse 1.3s ease-out 3; pointer-events: none;
+}
+/* ── Hashtag input ── */
+.ht-input {
+  width: 100%; padding: 9px 12px; font-size: 13px; font-family: inherit;
+  border: 1.5px solid #dee2e6; border-radius: 8px;
+  background: #fff; color: #212529; outline: none; transition: border-color .15s;
+}
+.ht-input:focus { border-color: #74c0fc; }
+/* ── Filter bar ── */
+#filter-bar {
+  background: #fff; border-bottom: 1px solid #e9ecef;
+  padding: 7px 14px; display: none; align-items: center; gap: 8px;
+  font-size: 12px; color: #495057; flex-shrink: 0; z-index: 9;
+}
+#filter-bar.show { display: flex; }
+.fb-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #e7f5ff; color: #1c7ed6; border: 1px solid #74c0fc;
+  padding: 3px 10px; border-radius: 20px; font-weight: 600;
+}
+.fb-clear {
+  background: none; border: none; color: #868e96;
+  font-size: 12px; cursor: pointer; padding: 3px 8px;
+  border-radius: 10px; transition: background .12s; margin-left: 2px;
+}
+.fb-clear:hover { background: #f1f3f5; }
+/* ── Popup hashtags ── */
+.pp-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.pp-tag {
+  font-size: 11px; font-weight: 600; color: #1c7ed6;
+  background: #e7f5ff; padding: 2px 8px; border-radius: 10px;
+  cursor: pointer; border: 1px solid transparent; transition: all .12s;
+}
+.pp-tag:hover { border-color: #74c0fc; }
+/* ── Vibration animations ── */
+@keyframes vib-lo {
+  0%,100% { transform: translate(0,0) rotate(0deg); }
+  25%     { transform: translate(-1px,.5px) rotate(-.4deg); }
+  75%     { transform: translate(1px,-.5px) rotate(.4deg); }
+}
+@keyframes vib-md {
+  0%,100% { transform: translate(0,0) rotate(0deg); }
+  20%     { transform: translate(-2px,-1px) rotate(-.8deg); }
+  50%     { transform: translate(2px,1px) rotate(.8deg); }
+  80%     { transform: translate(-1px,.5px) rotate(-.4deg); }
+}
+@keyframes vib-hi {
+  0%,100% { transform: translate(0,0) rotate(0deg); }
+  10%     { transform: translate(-3px,-1px) rotate(-1.5deg); }
+  30%     { transform: translate(3px,1px) rotate(1.5deg); }
+  50%     { transform: translate(-2px,-1px) rotate(-1deg); }
+  70%     { transform: translate(2px,1px) rotate(1deg); }
+  90%     { transform: translate(-1px,0) rotate(-.5deg); }
+}
+.vib-lo { animation: vib-lo 2.8s ease-in-out infinite; }
+.vib-md { animation: vib-md 1.4s ease-in-out infinite; }
+.vib-hi { animation: vib-hi 0.7s ease-in-out infinite; }
+/* ── Speech bubble tooltip ── */
+.post-bubble.leaflet-tooltip {
+  background: rgba(255,255,255,0.93) !important;
+  border: 0.5px solid rgba(0,0,0,0.13) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1) !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  padding: 3px 8px !important;
+  white-space: nowrap;
+  color: #212529;
+  font-family: 'Hiragino Sans','Yu Gothic UI','Meiryo',sans-serif;
+  pointer-events: none;
+}
+.post-bubble.leaflet-tooltip::before { display: none !important; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="header">
+    <div class="hd-l">
+      <div class="hd-t">
+        <i class="ti ti-map-pin" style="font-size:18px"></i>
+        みんなのマップ
+      </div>
+      <div class="hd-s" id="sub">読み込み中...</div>
+    </div>
+    <button id="post-btn" onclick="startPost()">
+      <i class="ti ti-plus" style="font-size:15px"></i>
+      投稿する
+    </button>
+  </div>
+  <div id="filter-bar">
+    <i class="ti ti-filter" style="font-size:13px" aria-hidden="true"></i>
+    絞り込み中:
+    <span class="fb-chip">
+      <i class="ti ti-hash" style="font-size:11px" aria-hidden="true"></i>
+      <span id="fb-tag-text"></span>
+    </span>
+    <button class="fb-clear" onclick="clearFilter()">
+      <i class="ti ti-x" style="font-size:11px" aria-hidden="true"></i> 解除
+    </button>
+  </div>
+  <div id="map"></div>
+</div>
+
+<div id="banner" onclick="exitPinMode()">
+  <i class="ti ti-crosshair" style="font-size:15px"></i>
+  投稿したい場所をタップ
+  <span style="opacity:.5; margin-left:8px">キャンセル</span>
+</div>
+
+<div id="overlay" onclick="ovClick(event)">
+  <div id="modal">
+    <div class="hdl"></div>
+    <div class="mtitle">📍 この場所に投稿</div>
+    <div class="mloc" id="mloc">
+      <i class="ti ti-location" style="font-size:12px"></i>
+      座標を取得中...
+    </div>
+
+    <div class="sl">カテゴリ</div>
+    <div class="cr" id="cr"></div>
+
+    <div class="sl">コメント</div>
+    <textarea id="ta" placeholder="今ここで何が起きてる？&#10;（例：渋滞中、工事中、綺麗な夕日 など）"
+              maxlength="200" oninput="document.getElementById('cc').textContent=this.value.length"></textarea>
+    <div class="cc"><span id="cc">0</span> / 200</div>
+
+    <div class="sl">ハッシュタグ（任意）</div>
+    <input id="ht" class="ht-input" type="text"
+           placeholder="例: #渋谷 #混雑　（スペース区切り、# は省略可）"
+           maxlength="100">
+
+    <div class="sl" style="margin-top:14px">消えるまでの時間</div>
+    <div class="er" id="er"></div>
+
+    <div class="acts">
+      <button class="bcanc" onclick="closeM()">キャンセル</button>
+      <button class="bsubm" onclick="doPost()">
+        投稿する <i class="ti ti-send" style="font-size:14px"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="toast">
+  <i class="ti ti-check" style="font-size:15px; color:#69db7c"></i>
+  <span id="tmsg">投稿しました！</span>
+</div>
+
+<!-- PWA Install Banner -->
+<div id="install-banner">
+  <div class="ib-icon">🗺️</div>
+  <div class="ib-text">
+    <div class="ib-title">みんなのマップ</div>
+    <div class="ib-sub">ホーム画面に追加してアプリとして使えます</div>
+  </div>
+  <button class="ib-install" onclick="installPWA()">追加する</button>
+  <button class="ib-close" onclick="dismissBanner()" aria-label="閉じる">
+    <i class="ti ti-x"></i>
+  </button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const CATS = [
+  { id:'none',    label:'特になし', ch:'無', fi:'#f8f9fa', st:'#adb5bd', tx:'#868e96', icon:'circle-dashed' },
+  { id:'weather', label:'天気',    ch:'天', fi:'#dbe4ff', st:'#4c6ef5', tx:'#364fc7', icon:'cloud-rain' },
+  { id:'traffic', label:'交通',    ch:'車', fi:'#fff3bf', st:'#f08c00', tx:'#e67700', icon:'car' },
+  { id:'event',   label:'催し',    ch:'祭', fi:'#f3d9fa', st:'#ae3ec9', tx:'#862e9c', icon:'confetti' },
+  { id:'spot',    label:'スポット', ch:'場', fi:'#d3f9d8', st:'#2f9e44', tx:'#2b8a3e', icon:'building-store' },
+  { id:'happy',   label:'幸せ',    ch:'幸', fi:'#fff0f6', st:'#e64980', tx:'#a61e4d', icon:'heart' },
+  { id:'unhappy', label:'不幸',    ch:'不', fi:'#e9ecef', st:'#495057', tx:'#212529', icon:'mood-sad' },
+  { id:'incident',label:'事件',    ch:'事', fi:'#ffe3e3', st:'#e03131', tx:'#c92a2a', icon:'alert-triangle' },
+];
+const EXPS = [
+  {h:1,l:'1時間'},{h:3,l:'3時間'},{h:6,l:'6時間'},{h:12,l:'12時間'},{h:24,l:'24時間'},
+];
+const firebaseConfig = {
+  apiKey: "AIzaSyBy-8FzR0NT0g6y5lG9Qm3Hyb121RVJU4U",
+  authDomain: "minna-no-map.firebaseapp.com",
+  databaseURL: "https://minna-no-map-default-rtdb.firebaseio.com",
+  projectId: "minna-no-map",
+  storageBucket: "minna-no-map.firebasestorage.app",
+  messagingSenderId: "1056228444352",
+  appId: "1:1056228444352:web:1691acf315a0ea539e8525"
+};
+
+let map, MKS = {}, posts = [], pmode = false, pendLL = null,
+    selCat = 'none', selExp = 3, activeFilter = null,
+    postsRef = null, newPostId = null, demoAdded = false;
+const gc = id => CATS.find(c => c.id === id) || CATS[0];
+const esc = t => { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; };
+
+function tAgo(ts) {
+  const s = (Date.now() - ts) / 1000;
+  if (s < 60) return 'たった今';
+  if (s < 3600) return Math.floor(s/60) + '分前';
+  return Math.floor(s/3600) + '時間前';
+}
+function getVibClass(views) {
+  const v = views || 0;
+  if (v >= 3) return 'vib-hi';
+  if (v >= 2) return 'vib-md';
+  if (v >= 1) return 'vib-lo';
+  return '';
+}
+function trackView(postId) {
+  try {
+    const key = 'vw';
+    const viewed = JSON.parse(localStorage.getItem(key) || '[]');
+    if (viewed.includes(postId)) return;
+    viewed.push(postId);
+    if (viewed.length > 500) viewed.shift();
+    localStorage.setItem(key, JSON.stringify(viewed));
+    if (postsRef) {
+      postsRef.child(postId).child('views').transaction(v => (v || 0) + 1);
+    }
+  } catch {}
+}
+function tLeft(e) {
+  const d = e - Date.now();
+  if (d <= 0) return '期限切れ';
+  const m = Math.floor(d/60000);
+  if (m < 60) return `あと${m}分`;
+  const h = Math.floor(m/60), r = m%60;
+  return r ? `あと${h}時間${r}分` : `あと${h}時間`;
+}
+function toast(msg) {
+  const t = document.getElementById('toast');
+  document.getElementById('tmsg').textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+// ── Firebase ──
+function initFirebase() {
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+  postsRef = db.ref('posts');
+
+  postsRef.on('value', snapshot => {
+    const data = snapshot.val() || {};
+    const now = Date.now();
+
+    // DBが空のときだけデモデータを投入
+    if (!demoAdded && Object.keys(data).length === 0) {
+      demoAdded = true;
+      demo();
+      return;
+    }
+    demoAdded = true;
+
+    posts = Object.values(data).filter(p => p && p.expiresAt > now);
+    render(); upSub();
+
+    // 新規投稿後にポップアップを開く
+    if (newPostId && MKS[newPostId]) {
+      setTimeout(() => { MKS[newPostId]?.openPopup(); newPostId = null; }, 150);
+    }
+  });
+}
+function demo() {
+  const n = Date.now();
+  [
+    [35.6580,139.7016,'渋谷スクランブル交差点、外国人観光客でにぎわっています！','event',.5,2,['渋谷','混雑','インバウンド']],
+    [35.6896,139.6917,'新宿西口で工事中。歩道が一部狭くなっています','traffic',1,4,['新宿','工事','迂回']],
+    [35.7148,139.7967,'雷門付近、インバウンドで大混雑！人力車が列をなしてます','event',.3,3,['浅草','混雑','インバウンド']],
+    [35.6311,139.7410,'品川駅ホーム、電車13分遅延あり','traffic',.2,1.5,['品川','遅延','JR']],
+    [35.6809,139.7673,'秋葉原、今日はアニメイベントで人が多め','event',1.5,5,['秋葉原','アニメ','イベント']],
+    [35.7155,139.7745,'上野公園、ハトが大量発生中 笑','spot',2,6,['上野','公園']],
+    [35.6623,139.7317,'六本木ヒルズ展望台から富士山が見えます！','weather',.8,3,['六本木','富士山','絶景']],
+    [35.6338,139.8807,'葛西臨海公園、潮風が気持ちいい','spot',.4,5,['葛西','公園','海']],
+    [35.6698,139.7025,'代々木公園で子犬を触らせてもらえた。最高に幸せ〜','happy',.6,4,['代々木','犬','癒し']],
+    [35.6895,139.6919,'傘を電車に忘れてきた……雨も降ってきたし最悪','unhappy',1.2,3,['忘れ物','雨']],
+    [35.6284,139.7387,'品川駅近くで接触事故。パトカー来てます。お気をつけて','incident',.3,2,['品川','事故','注意']],
+  ].forEach(([lt,lg,cm,cat,ha,eh,ht],i) => {
+    const p = { id:'d'+i, lat:lt, lng:lg, comment:cm, category:cat,
+      hashtags: ht||[], createdAt: n-ha*3600000, expiresAt: n+eh*3600000 };
+    postsRef.child(p.id).set(p);
+  });
+}
+
+// ── Markers ──
+function mkIcon(p, isNew = false) {
+  const now = Date.now();
+  const fr  = Math.max(0, Math.min(1, (p.expiresAt-now)/(p.expiresAt-p.createdAt)));
+  const c   = gc(p.category);
+  const sz  = fr > .6 ? 44 : fr > .3 ? 38 : 32;
+  const op  = .6 + .4 * fr;
+  const fsz = Math.round(sz * 0.46);
+  const pulse = isNew
+    ? `<div class="mk-pulse" style="background:${c.st}"></div>`
+    : '';
+  const vibClass = getVibClass(p.views);
+  const html = `<div style="position:relative;width:${sz}px;height:${sz+8}px;text-align:center">
+    ${pulse}
+    <div class="${vibClass}" style="width:${sz}px;height:${sz}px;border-radius:50%;background:#fff;border:2.5px solid ${c.st};display:flex;align-items:center;justify-content:center;opacity:${op};position:relative;box-shadow:0 2px 6px rgba(0,0,0,.18)">
+      <i class="ti ti-${c.icon}" style="font-size:${fsz}px;color:${c.st};line-height:1"></i>
+    </div>
+    <div style="width:3px;height:8px;background:${c.st};margin:0 auto;border-radius:0 0 2px 2px;opacity:${op*.85}"></div>
+  </div>`;
+  return L.divIcon({ html, iconSize:[sz,sz+8], iconAnchor:[sz/2,sz+8], popupAnchor:[0,-(sz+10)], className:'' });
+}
+
+function mkPopup(p) {
+  const c  = gc(p.category);
+  const hl = (p.expiresAt - Date.now()) / 3600000;
+  const tags = p.hashtags || [];
+  const tagsHtml = tags.length
+    ? `<div class="pp-tags">${tags.map(t=>`<span class="pp-tag" onclick="filterByTag('${esc(t)}')">#${esc(t)}</span>`).join('')}</div>`
+    : '';
+  return `<div>
+    <span class="pp-cat" style="background:${c.fi};color:${c.tx}">
+      <i class="ti ti-${c.icon}" style="font-size:11px"></i>${c.label}
+    </span>
+    <div class="pp-txt">${esc(p.comment)}</div>
+    ${tagsHtml}
+    <div class="pp-meta">
+      <span><i class="ti ti-clock" style="font-size:10px"></i> ${tAgo(p.createdAt)}</span>
+      <span class="${hl<1?'pp-urg':''}"><i class="ti ti-hourglass" style="font-size:10px"></i> ${tLeft(p.expiresAt)}</span>
+    </div>
+  </div>`;
+}
+
+function render() {
+  const now = Date.now();
+  posts = posts.filter(p => p.expiresAt > now);
+  Object.keys(MKS).forEach(id => {
+    if (!posts.find(p => p.id === id)) {
+      if (map.hasLayer(MKS[id])) map.removeLayer(MKS[id]);
+      delete MKS[id];
+    }
+  });
+  posts.forEach(p => {
+    const show = !activeFilter || (p.hashtags||[]).includes(activeFilter);
+    if (MKS[p.id]) {
+      MKS[p.id].setIcon(mkIcon(p)); MKS[p.id].setPopupContent(mkPopup(p));
+      if (show && !map.hasLayer(MKS[p.id])) MKS[p.id].addTo(map);
+      if (!show && map.hasLayer(MKS[p.id])) map.removeLayer(MKS[p.id]);
+    } else {
+      const m = L.marker([p.lat,p.lng], {icon:mkIcon(p)});
+      m.bindPopup(mkPopup(p), {maxWidth:270});
+      m.on('popupopen', () => trackView(p.id));
+      const raw = p.comment || '';
+      const bub = raw.length > 9 ? raw.slice(0,9) + '…' : raw;
+      let h = 0; for (const c of p.id) h = (h * 31 + c.charCodeAt(0)) & 0xFFFF;
+      if (h % 10 < 3) {
+        m.bindTooltip(esc(bub), {permanent:true, direction:'top', className:'post-bubble', offset:[0,-4]});
+      }
+      MKS[p.id] = m;
+      if (show) m.addTo(map);
+    }
+  });
+}
+function upSub() {
+  const now = Date.now();
+  const total = posts.filter(p => p.expiresAt > now).length;
+  const shown = activeFilter
+    ? posts.filter(p => p.expiresAt > now && (p.hashtags||[]).includes(activeFilter)).length
+    : total;
+  document.getElementById('sub').textContent = activeFilter
+    ? `#${activeFilter} の投稿 ${shown}件`
+    : `${total}件の投稿が表示中`;
+}
+
+// ── Hashtag filter ──
+function parseHashtags(str) {
+  if (!str.trim()) return [];
+  return [...new Set(
+    str.replace(/#/g,' ').split(/[\s,、。]+/)
+       .map(t => t.trim()).filter(t => t.length > 0)
+  )].slice(0, 6);
+}
+function filterByTag(tag) {
+  activeFilter = tag;
+  document.getElementById('fb-tag-text').textContent = tag;
+  document.getElementById('filter-bar').classList.add('show');
+  map.closePopup(); render(); upSub();
+}
+function clearFilter() {
+  activeFilter = null;
+  document.getElementById('filter-bar').classList.remove('show');
+  render(); upSub();
+}
+
+// ── 現在地投稿（GPS失敗時は地図タップへフォールバック）──
+function startPost() {
+  const btn = document.getElementById('post-btn');
+  btn.innerHTML = '<i class="ti ti-loader-2" style="font-size:15px;animation:spin 1s linear infinite"></i> 取得中...';
+  btn.disabled = true;
+
+  if (!navigator.geolocation) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="ti ti-plus" style="font-size:15px"></i> 投稿する';
+    enterPinMode();
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-plus" style="font-size:15px"></i> 投稿する';
+      const ll = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      map.setView([ll.lat, ll.lng], Math.max(map.getZoom(), 15), { animate: true });
+      openM(ll);
+    },
+    () => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="ti ti-plus" style="font-size:15px"></i> 投稿する';
+      toast('GPS取得できませんでした。地図をタップして場所を選んでください');
+      enterPinMode();
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+  );
+}
+
+function enterPinMode() {
+  pmode = true;
+  const btn = document.getElementById('post-btn');
+  btn.innerHTML = '<i class="ti ti-x" style="font-size:15px"></i> キャンセル';
+  btn.classList.add('cancel');
+  document.getElementById('map').classList.add('pm');
+  document.getElementById('banner').style.display = 'flex';
+}
+
+function exitPinMode() {
+  pmode = false;
+  const btn = document.getElementById('post-btn');
+  btn.innerHTML = '<i class="ti ti-plus" style="font-size:15px"></i> 投稿する';
+  btn.classList.remove('cancel');
+  document.getElementById('map').classList.remove('pm');
+  document.getElementById('banner').style.display = 'none';
+}
+
+// ── Modal ──
+function openM(ll) {
+  pendLL = ll;
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('ta').value = '';
+  document.getElementById('cc').textContent = '0';
+  document.getElementById('ht').value = '';
+  document.getElementById('mloc').innerHTML =
+    '<i class="ti ti-current-location" style="font-size:12px"></i> 現在地';
+  setTimeout(() => document.getElementById('ta').focus(), 150);
+}
+function closeM() { document.getElementById('overlay').classList.remove('show'); pendLL = null; exitPinMode(); }
+function ovClick(e) { if (e.target===document.getElementById('overlay')) closeM(); }
+
+async function doPost() {
+  const comment = document.getElementById('ta').value.trim();
+  if (!comment) {
+    const ta = document.getElementById('ta');
+    ta.style.borderColor = '#ffa8a8'; ta.focus();
+    setTimeout(() => ta.style.borderColor = '', 1500); return;
+  }
+  if (!pendLL) return;
+  const now = Date.now();
+  const hashtags = parseHashtags(document.getElementById('ht').value);
+  const p = {
+    id: now+'_'+Math.random().toString(36).slice(2,8),
+    lat:pendLL.lat, lng:pendLL.lng, comment, category:selCat,
+    hashtags,
+    createdAt:now, expiresAt:now+selExp*3600000,
+  };
+  newPostId = p.id;
+  postsRef.child(p.id).set(p);
+  closeM();
+  map.setView([p.lat,p.lng], Math.max(map.getZoom(),14), {animate:true});
+  toast('投稿しました！');
+}
+
+// ── UI Init ──
+function initUI() {
+  const cr = document.getElementById('cr');
+  CATS.forEach(c => {
+    const b = document.createElement('button'); b.className = 'cb'; b.dataset.id = c.id;
+    b.innerHTML = `<span class="cb-badge" style="background:${c.fi};color:${c.tx}"><i class="ti ti-${c.icon}"></i></span>${c.label}`;
+    if (c.id === selCat) { b.style.background=c.fi; b.style.color=c.tx; b.style.borderColor=c.st; b.querySelector('.cb-badge').style.background=c.st; b.querySelector('.cb-badge').style.color='#fff'; }
+    b.onclick = () => {
+      selCat = c.id;
+      document.querySelectorAll('.cb').forEach(btn => {
+        const cc = gc(btn.dataset.id), s = btn.dataset.id===c.id;
+        btn.style.background=s?cc.fi:''; btn.style.color=s?cc.tx:''; btn.style.borderColor=s?cc.st:'';
+        const badge = btn.querySelector('.cb-badge');
+        if (badge) { badge.style.background=s?cc.st:cc.fi; badge.style.color=s?'#fff':cc.tx; }
+      });
+    };
+    cr.appendChild(b);
+  });
+  const er = document.getElementById('er');
+  EXPS.forEach(o => {
+    const b = document.createElement('button');
+    b.className = 'eb' + (o.h===selExp?' sel':''); b.dataset.h = o.h; b.textContent = o.l;
+    b.onclick = () => { selExp=o.h; document.querySelectorAll('.eb').forEach(btn=>btn.classList.toggle('sel',+btn.dataset.h===o.h)); };
+    er.appendChild(b);
+  });
+}
+
+// ── Map Init ──
+window.addEventListener('DOMContentLoaded', () => {
+  initUI();
+  map = L.map('map', { center:[35.6762,139.6503], zoom:12 });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  }).addTo(map);
+  map.on('click', e => { if (pmode) openM(e.latlng); });
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      pos => map.setView([pos.coords.latitude, pos.coords.longitude], 15), () => {}
+    );
+  }
+  initFirebase();
+  setInterval(() => {
+    if (!postsRef) return;
+    const now = Date.now();
+    postsRef.once('value').then(snapshot => {
+      const data = snapshot.val() || {};
+      Object.entries(data).forEach(([key, post]) => {
+        if (post && post.expiresAt <= now) postsRef.child(key).remove();
+      });
+    });
+  }, 60000);
+});
+</script>
+
+<script>
+// ── Service Worker 登録 ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('SW registered:', reg.scope))
+      .catch(err => console.warn('SW registration failed:', err));
+  });
+}
+
+// ── PWA インストールプロンプト ──
+let deferredPrompt = null;
+const banner = document.getElementById('install-banner');
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  // 既に非表示にしていなければバナー表示
+  if (!sessionStorage.getItem('pwa-dismissed')) {
+    setTimeout(() => banner.classList.add('show'), 1500);
+  }
+});
+
+window.addEventListener('appinstalled', () => {
+  banner.classList.remove('show');
+  deferredPrompt = null;
+  toast('アプリをインストールしました！');
+});
+
+function installPWA() {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  deferredPrompt.userChoice.then(choice => {
+    if (choice.outcome === 'accepted') {
+      banner.classList.remove('show');
+    }
+    deferredPrompt = null;
+  });
+}
+
+function dismissBanner() {
+  banner.classList.remove('show');
+  sessionStorage.setItem('pwa-dismissed', '1');
+}
+</script>
+</body>
+</html>
