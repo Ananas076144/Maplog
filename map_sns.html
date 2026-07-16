@@ -180,6 +180,15 @@ textarea:focus { border-color: #74c0fc; }
   border-top: 1px solid #f1f3f5; padding-top: 7px;
 }
 .pp-urg { color: #e03131; font-weight: 600; }
+.pp-report { margin-top: 8px; border-top: 1px solid #f1f3f5; padding-top: 7px; }
+.pp-report-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px; color: #adb5bd; background: none;
+  border: none; cursor: pointer; padding: 2px 0; transition: color .12s;
+}
+.pp-report-btn:hover { color: #e03131; }
+.pp-report-btn.done { color: #adb5bd; cursor: default; }
+.pp-report-btn:disabled { cursor: default; }
 /* ── PWA Install Banner ── */
 #install-banner {
   position: fixed; bottom: 0; left: 0; right: 0;
@@ -379,6 +388,7 @@ textarea:focus { border-color: #74c0fc; }
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
@@ -395,6 +405,9 @@ const CATS = [
 const EXPS = [
   {h:1,l:'1時間'},{h:3,l:'3時間'},{h:6,l:'6時間'},{h:12,l:'12時間'},{h:24,l:'24時間'},
 ];
+const POST_COOLDOWN_MS = 30000;   // 連投防止：前回投稿から何ms待つか（クライアント側の簡易対策。本当の制限はFirebaseルール側）
+const REPORT_HIDE_THRESHOLD = 3;  // この件数以上「通報」されたら全員の地図から自動非表示
+const ENABLE_DEMO_SEED = false;   // 本番公開時はfalseのまま。動作確認したい時だけtrueに（新ルールだと連投扱いで一部しか入らない点に注意）
 const firebaseConfig = {
   apiKey: "AIzaSyBy-8FzR0NT0g6y5lG9Qm3Hyb121RVJU4U",
   authDomain: "minna-no-map.firebaseapp.com",
@@ -407,9 +420,40 @@ const firebaseConfig = {
 
 let map, MKS = {}, posts = [], pmode = false, pendLL = null,
     selCat = 'none', selExp = 3, activeFilter = null,
-    postsRef = null, newPostId = null, demoAdded = false;
+    postsRef = null, newPostId = null, demoAdded = false, myUid = null;
 const gc = id => CATS.find(c => c.id === id) || CATS[0];
 const esc = t => { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; };
+// HTML属性値用：クォートもエスケープする（onclick等への文字列注入を防ぐ）
+const escAttr = t => esc(t).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+// ── 投稿位置をぼかす（自宅特定などを防ぐプライバシー対策）──
+// 指定半径の円内に均等分布するようランダムオフセットを加える
+function fuzzLocation(lat, lng, radiusM = 80) {
+  const r = radiusM * Math.sqrt(Math.random());
+  const theta = Math.random() * 2 * Math.PI;
+  const dLat = (r * Math.cos(theta)) / 111320;                              // 緯度1度 ≒ 111.32km
+  const dLng = (r * Math.sin(theta)) / (111320 * Math.cos(lat * Math.PI/180));
+  return { lat: lat + dLat, lng: lng + dLng };
+}
+
+// ── 通報（クライアント側の簡易実装。悪用され得る点は要注意 → 会話内で後述）──
+function isReported(id) {
+  try { return JSON.parse(localStorage.getItem('reported') || '[]').includes(id); }
+  catch { return false; }
+}
+function markReportedLocally(id) {
+  try {
+    const list = JSON.parse(localStorage.getItem('reported') || '[]');
+    if (!list.includes(id)) { list.push(id); localStorage.setItem('reported', JSON.stringify(list)); }
+  } catch {}
+}
+function reportPost(id) {
+  if (!postsRef || isReported(id)) return;
+  markReportedLocally(id);
+  postsRef.child(id).child('reportCount').transaction(v => (v || 0) + 1).catch(() => {});
+  map.closePopup();
+  toast('通報しました。ご協力ありがとうございます');
+}
 
 function tAgo(ts) {
   const s = (Date.now() - ts) / 1000;
@@ -433,7 +477,7 @@ function trackView(postId) {
     if (viewed.length > 500) viewed.shift();
     localStorage.setItem(key, JSON.stringify(viewed));
     if (postsRef) {
-      postsRef.child(postId).child('views').transaction(v => (v || 0) + 1);
+      postsRef.child(postId).child('views').transaction(v => (v || 0) + 1).catch(() => {});
     }
   } catch {}
 }
@@ -458,19 +502,28 @@ function initFirebase() {
   const db = firebase.database();
   postsRef = db.ref('posts');
 
+  // 匿名ログイン（サイレント。ユーザー操作は不要）
+  firebase.auth().onAuthStateChanged(user => { myUid = user ? user.uid : null; });
+  firebase.auth().signInAnonymously().catch(err => {
+    console.warn('匿名ログイン失敗:', err);
+    toast('通信に問題が発生しました。再読み込みしてください');
+  });
+
   postsRef.on('value', snapshot => {
     const data = snapshot.val() || {};
     const now = Date.now();
 
-    // DBが空のときだけデモデータを投入
+    // DBが空のときだけデモデータを投入（本番では ENABLE_DEMO_SEED=false のため実行されない）
     if (!demoAdded && Object.keys(data).length === 0) {
       demoAdded = true;
-      demo();
+      if (ENABLE_DEMO_SEED) demo();
       return;
     }
     demoAdded = true;
 
-    posts = Object.values(data).filter(p => p && p.expiresAt > now);
+    posts = Object.values(data).filter(p =>
+      p && p.expiresAt > now && (p.reportCount || 0) < REPORT_HIDE_THRESHOLD
+    );
     render(); upSub();
 
     // 新規投稿後にポップアップを開く
@@ -495,7 +548,7 @@ function demo() {
     [35.6284,139.7387,'品川駅近くで接触事故。パトカー来てます。お気をつけて','incident',.3,2,['品川','事故','注意']],
   ].forEach(([lt,lg,cm,cat,ha,eh,ht],i) => {
     const p = { id:'d'+i, lat:lt, lng:lg, comment:cm, category:cat,
-      hashtags: ht||[], createdAt: n-ha*3600000, expiresAt: n+eh*3600000 };
+      hashtags: ht||[], createdAt: n-ha*3600000, expiresAt: n+eh*3600000, uid: myUid || 'seed' };
     postsRef.child(p.id).set(p);
   });
 }
@@ -527,8 +580,9 @@ function mkPopup(p) {
   const hl = (p.expiresAt - Date.now()) / 3600000;
   const tags = p.hashtags || [];
   const tagsHtml = tags.length
-    ? `<div class="pp-tags">${tags.map(t=>`<span class="pp-tag" onclick="filterByTag('${esc(t)}')">#${esc(t)}</span>`).join('')}</div>`
+    ? `<div class="pp-tags">${tags.map(t=>`<span class="pp-tag" data-tag="${escAttr(t)}">#${esc(t)}</span>`).join('')}</div>`
     : '';
+  const reported = isReported(p.id);
   return `<div>
     <span class="pp-cat" style="background:${c.fi};color:${c.tx}">
       <i class="ti ti-${c.icon}" style="font-size:11px"></i>${c.label}
@@ -538,6 +592,11 @@ function mkPopup(p) {
     <div class="pp-meta">
       <span><i class="ti ti-clock" style="font-size:10px"></i> ${tAgo(p.createdAt)}</span>
       <span class="${hl<1?'pp-urg':''}"><i class="ti ti-hourglass" style="font-size:10px"></i> ${tLeft(p.expiresAt)}</span>
+    </div>
+    <div class="pp-report">
+      <button class="pp-report-btn${reported?' done':''}" data-report-id="${escAttr(p.id)}" ${reported?'disabled':''}>
+        <i class="ti ti-flag" style="font-size:11px"></i> ${reported?'通報済み':'不適切な投稿を通報'}
+      </button>
     </div>
   </div>`;
 }
@@ -588,9 +647,20 @@ function parseHashtags(str) {
   if (!str.trim()) return [];
   return [...new Set(
     str.replace(/#/g,' ').split(/[\s,、。]+/)
-       .map(t => t.trim()).filter(t => t.length > 0)
+       .map(t => t.trim().slice(0, 20))   // タグ1件は20文字まで
+       .filter(t => t.length > 0)
   )].slice(0, 6);
 }
+
+// ── タグクリック（イベントデリゲーション）──
+// ポップアップ内に動的生成される .pp-tag のクリックを document で一括処理。
+// data-tag 属性から値を読むので、タグ文字列がJSとして実行されることはない。
+document.addEventListener('click', e => {
+  const tagEl = e.target.closest('.pp-tag');
+  if (tagEl && tagEl.dataset.tag) { filterByTag(tagEl.dataset.tag); return; }
+  const repEl = e.target.closest('.pp-report-btn');
+  if (repEl && repEl.dataset.reportId) reportPost(repEl.dataset.reportId);
+});
 function filterByTag(tag) {
   activeFilter = tag;
   document.getElementById('fb-tag-text').textContent = tag;
@@ -674,19 +744,45 @@ async function doPost() {
     setTimeout(() => ta.style.borderColor = '', 1500); return;
   }
   if (!pendLL) return;
+
+  if (!myUid) {
+    toast('接続中です。数秒待ってからもう一度お試しください');
+    return;
+  }
+
+  // 連投防止（簡易版・体感用）：本当の制限はFirebaseルール側のrateLimitsノードで強制される
+  const lastPostAt = Number(localStorage.getItem('lastPostAt') || 0);
+  const waitMs = POST_COOLDOWN_MS - (Date.now() - lastPostAt);
+  if (waitMs > 0) {
+    toast(`連続投稿はできません（あと${Math.ceil(waitMs / 1000)}秒）`);
+    return;
+  }
+
   const now = Date.now();
   const hashtags = parseHashtags(document.getElementById('ht').value);
+  const loc = fuzzLocation(pendLL.lat, pendLL.lng);   // 生座標をそのまま保存しない
   const p = {
     id: now+'_'+Math.random().toString(36).slice(2,8),
-    lat:pendLL.lat, lng:pendLL.lng, comment, category:selCat,
-    hashtags,
+    lat:loc.lat, lng:loc.lng, comment, category:selCat,
+    hashtags, uid: myUid,
     createdAt:now, expiresAt:now+selExp*3600000,
   };
-  newPostId = p.id;
-  postsRef.child(p.id).set(p);
-  closeM();
-  map.setView([p.lat,p.lng], Math.max(map.getZoom(),14), {animate:true});
-  toast('投稿しました！');
+
+  // posts と rateLimits を1回のupdateでまとめて書き込む（片方だけ成立することはない）
+  const updates = {};
+  updates['posts/' + p.id] = p;
+  updates['rateLimits/' + myUid] = firebase.database.ServerValue.TIMESTAMP;
+
+  firebase.database().ref().update(updates).then(() => {
+    newPostId = p.id;
+    localStorage.setItem('lastPostAt', String(now));
+    closeM();
+    map.setView([p.lat,p.lng], Math.max(map.getZoom(),14), {animate:true});
+    toast('投稿しました！');
+  }).catch(err => {
+    console.warn('投稿失敗:', err);
+    toast('投稿できませんでした（連投制限の可能性があります）');
+  });
 }
 
 // ── UI Init ──
@@ -737,7 +833,7 @@ window.addEventListener('DOMContentLoaded', () => {
     postsRef.once('value').then(snapshot => {
       const data = snapshot.val() || {};
       Object.entries(data).forEach(([key, post]) => {
-        if (post && post.expiresAt <= now) postsRef.child(key).remove();
+        if (post && post.expiresAt <= now) postsRef.child(key).remove().catch(() => {});
       });
     });
   }, 60000);
